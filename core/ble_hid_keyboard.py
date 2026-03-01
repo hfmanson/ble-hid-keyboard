@@ -5,12 +5,25 @@ import dbus
 
 from core.ble_dbus import Service, Characteristic, Application, BLUEZ_SERVICE_NAME, GATT_MANAGER_IFACE, Descriptor
 from core.bluetooth_utils import turn_off
-from core.hidraw_keyboard import keyboards
+from core.hidraw_keyboard_mouse import keyboards
+from core.hidraw_keyboard_mouse import mice
 
-#HID_REPORT_DESCRIPTOR = '05010906a1018501050719e029e71500250175019508810295017508810395057501050819012905910295017503910395067508150025ff0507190029ff8100c0'
-#HID_REPORT_DESCRIPTOR = '05010906a101050719e029e715002501750195088102750895018101050875019505190129059102750395019101050719002aff00150026ff00750895068100c0'
-HID_REPORT_DESCRIPTOR = "05010906a1018501050719e029e715002501750195088102750895018101050875019505190129059102750395019101050719002aff00150026ff00750895068100c0"
-#HID_REPORT_DESCRIPTOR = "05010906a101050719e029e715002501750195088102750895018101050875019505190129059102750395019101050719002aff00150026ff00750895068100c0"
+HID_REPORT_DESCRIPTOR = (
+    # Keyboard (Report ID 1)
+    "05010906A1018501"
+    "050719E029E715002501750195088102"
+    "750895018101"
+    "0507190029FF150026FF00750895068100"
+    "C0"
+    # Mouse (Report ID 2)
+    "05010902A1018502"
+    "0901A100"
+    "05091901290315002501750195038102"
+    "750595018103"
+    "0501093009311581257F750895028106"
+    "09381581257F750895018106"
+    "C0C0"
+)
 
 BATTERY_SERVICE_UUID = '180f'
 BATTERY_LVL_UUID = '2a19'
@@ -94,7 +107,8 @@ class HIDService(Service):
             HIDInfoCharacteristic(self),
             ControlPointCharacteristic(self),
             ReportMapCharacteristic(self),
-            InputReportCharacteristic(self)
+            KeyboardInputReport(self),
+            MouseInputReport(self)
         ]
 
 
@@ -154,55 +168,135 @@ class ReportMapCharacteristic(Characteristic):
         return self.value
 
 
-class InputReportCharacteristic(Characteristic):
+class ReportReferenceDescriptor(Descriptor):
+    UUID = '2908'
+
+    def __init__(self, bus, index, characteristic, report_id):
+        Descriptor.__init__(
+            self,
+            bus,
+            index,
+            self.UUID,
+            ['read'],
+            characteristic
+        )
+
+        # [Report ID, Report Type]
+        # Report Type 0x01 = Input Report
+        self.value = dbus.Array(
+            [report_id, 0x01],
+            signature=dbus.Signature('y')
+        )
+
+    def ReadValue(self, options):
+        return self.value
+
+class KeyboardInputReport(Characteristic):
 
     def __init__(self, service):
-        Characteristic.__init__(self, self.__class__.__name__, service,
-                                REPORT_CHARACTERISTIC_UUID, ["read", "notify"])
-        self.value = hex_2_dbus_array("0000000000000000")
+        Characteristic.__init__(
+            self,
+            self.__class__.__name__,
+            service,
+            REPORT_CHARACTERISTIC_UUID,
+            ["read", "notify"]
+        )
 
-        self.descriptors = [Report1ReferenceDescriptor(service.bus, 0, self)]
-        logging.info(f"Created InputReportCharacteristic: {self.value}")
+        REPORT_ID = 1
+        # 8-byte leeg keyboard report
+        self.value = dbus.Array([0] * 8, signature=dbus.Signature("y"))
 
-    def send(self, data):
-        logging.info(f"Send key")
-        super().properties_changed({"Value": dbus.Array(data, signature=dbus.Signature("y"))})
+        # Report Reference Descriptor (Report ID 1, Input Report)
+        self.descriptors = [
+            ReportReferenceDescriptor(service.bus, 0, self, REPORT_ID)
+        ]
+
+        logging.info("Created KeyboardInputReport characteristic")
+
+    def send(self, raw):
+        """
+        raw = exact 8 bytes van HIDRAW:
+        [modifier, reserved, key1, key2, key3, key4, key5, key6]
+        """
+        if len(raw) != 8:
+            logging.warning(f"KeyboardInputReport: invalid length {len(raw)}")
+            return False
+
+        report = list(raw)
+
+        #logging.info(f"KeyboardInputReport SEND: {report}")
+
+        super().properties_changed({
+            "Value": dbus.Array(report, signature=dbus.Signature("y"))
+        })
+
         return True
 
     def ReadValue(self, options):
-        logging.info(f"Read {self.name}: {self.value}")
         return self.value
-
-    def WriteValue(self, value, options):
-        logging.info(f"Write {self.name}: {value}")
-        self.value = value
 
     def StartNotify(self):
-        logging.info(f"Started InputReportCharacteristic notifying")
+        logging.info("KeyboardInputReport: StartNotify")
         keyboards.watch(self.send)
-        logging.info(f"Started HID keyboard watching")
 
     def StopNotify(self):
-        logging.info(f"Stop Report Keyboard Input")
+        logging.info("KeyboardInputReport: StopNotify")
 
 
-class Report1ReferenceDescriptor(Descriptor):
-    DESCRIPTOR_UUID = '2908'
+class MouseInputReport(Characteristic):
 
-    def __init__(self, bus, index, characteristic):
-        Descriptor.__init__(
-            self, bus, index,
-            self.DESCRIPTOR_UUID,
-            ['read'],
-            characteristic)
+    def __init__(self, service):
+        Characteristic.__init__(
+            self,
+            self.__class__.__name__,
+            service,
+            REPORT_CHARACTERISTIC_UUID,
+            ["read", "notify"]
+        )
 
-        self.value = dbus.Array(bytearray.fromhex('0101'), signature=dbus.Signature('y'))
-        print(f'***ReportReference***: {self.value}')
+        REPORT_ID = 2
+        # 4-byte leeg mouse report
+        # [buttons, dx, dy, wheel]
+        self.value = dbus.Array([0] * 4, signature=dbus.Signature("y"))
+
+        # Report Reference Descriptor (Report ID 2, Input Report)
+        self.descriptors = [
+            ReportReferenceDescriptor(service.bus, 1, self, REPORT_ID)
+        ]
+
+        logging.info("Created MouseInputReport characteristic")
+
+    def send(self, raw):
+        """
+        raw = HIDRAW mouse report:
+        [buttons, dx, dy, wheel]
+        """
+        if len(raw) < 3:
+            logging.warning("MouseInputReport: invalid mouse report")
+            return False
+
+        # Zorg dat het altijd 4 bytes zijn
+        report = list(raw[:4])
+        while len(report) < 4:
+            report.append(0)
+
+        #logging.info(f"MouseInputReport SEND: {report}")
+
+        super().properties_changed({
+            "Value": dbus.Array(report, signature=dbus.Signature("y"))
+        })
+
+        return True
 
     def ReadValue(self, options):
-        print(f'Read ReportReference: {self.value}')
         return self.value
 
+    def StartNotify(self):
+        logging.info("MouseInputReport: StartNotify")
+        mice.watch(self.send)
+
+    def StopNotify(self):
+        logging.info("MouseInputReport: StopNotify")
 
 def hex_2_dbus_array(value):
     return dbus.Array(bytearray.fromhex(value))
