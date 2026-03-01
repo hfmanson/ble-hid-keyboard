@@ -6,7 +6,7 @@ The application is tested on Debian based Linux distributions and Raspberry Pi O
 ## How to use
 1. Install required packages:
 ```
-$ sudo apt install libdbus-1-3 libdbus-1-dev libcairo2-dev libxt-dev libgirepository1.0-dev git mc
+$ sudo apt install libdbus-1-3 libdbus-1-dev libcairo2-dev libxt-dev libgirepository1.0-dev git mc python3-venv
 ```
 2. Get source code of application to your Linux distribution
 ```
