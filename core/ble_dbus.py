@@ -45,7 +45,7 @@ class Service(dbus.service.Object):
     def __init__(self, bus, uuid, primary):
         self.name = self.__class__.__name__
         logging.info(f"NAME : {self.name}")
-        self.path = self.PATH_BASE + self.name
+        self.path = self.PATH_BASE + "/" + self.name
         self.bus = bus
         self.uuid = uuid
         self.primary = primary
@@ -89,7 +89,7 @@ class Characteristic(dbus.service.Object):
 
     def __init__(self, name, service, uuid, flags):
         self.name = name
-        self.path = service.path + self.name
+        self.path = service.path + "/" + self.name
         self.uuid = uuid
         self.service = service
         self.flags = flags
