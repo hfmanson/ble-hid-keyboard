@@ -94,7 +94,7 @@ class HIDService(Service):
             HIDInfoCharacteristic(self),
             ControlPointCharacteristic(self),
             ReportMapCharacteristic(self),
-            ReportCharacteristic(self)
+            InputReportCharacteristic(self)
         ]
 
 
@@ -119,7 +119,7 @@ class HIDInfoCharacteristic(Characteristic):
 
     def __init__(self, service):
         Characteristic.__init__(self, self.__class__.__name__,
-                                service, HID_INFO_CHARACTERISTIC_UUID, ['secure-read'])
+                                service, HID_INFO_CHARACTERISTIC_UUID, ['read'])
         self.value = hex_2_dbus_array("01110002")
         logging.info(f"Created {self.name} value: {self.value}")
 
@@ -154,14 +154,15 @@ class ReportMapCharacteristic(Characteristic):
         return self.value
 
 
-class ReportCharacteristic(Characteristic):
+class InputReportCharacteristic(Characteristic):
 
     def __init__(self, service):
         Characteristic.__init__(self, self.__class__.__name__, service,
-                                REPORT_CHARACTERISTIC_UUID, ["secure-read", "notify"])
-        self.value = hex_2_dbus_array("000000000000")
-        self.descriptors = [Report1ReferenceDescriptor(service.bus, 1, self)]
-        logging.info(f"Created ReportCharacteristic: {self.value}")
+                                REPORT_CHARACTERISTIC_UUID, ["read", "notify"])
+        self.value = hex_2_dbus_array("0000000000000000")
+
+        self.descriptors = [Report1ReferenceDescriptor(service.bus, 0, self)]
+        logging.info(f"Created InputReportCharacteristic: {self.value}")
 
     def send(self, data):
         logging.info(f"Send key")
@@ -177,7 +178,7 @@ class ReportCharacteristic(Characteristic):
         self.value = value
 
     def StartNotify(self):
-        logging.info(f"Started ReportCharacteristic notifying")
+        logging.info(f"Started InputReportCharacteristic notifying")
         keyboards.watch(self.send)
         logging.info(f"Started HID keyboard watching")
 
