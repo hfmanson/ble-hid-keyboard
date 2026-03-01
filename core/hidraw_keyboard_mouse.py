@@ -97,7 +97,7 @@ class HidrawDevinfo(ctypes.Structure):
         ('product', ctypes.c_ushort),
     ]
 
-
+# Keyboard
 class Keyboard:
     def __init__(self, dev_node, name, descriptor):
         self.dev_node = dev_node
@@ -182,4 +182,98 @@ def is_keyboard(hidraw):
     return hex_string.startswith("05010906a101050719e0")
 
 
+
+
+# Mouse
+class Mouse:
+    def __init__(self, dev_node, name, descriptor):
+        self.dev_node = dev_node
+        self.name = name
+        self.descriptor = descriptor
+
+    def print(self):
+        descriptor_hex = bytearray(self.descriptor).hex()
+        logging.info(f"{self.dev_node} - {self.name}")
+        logging.info(f"Descriptor: {descriptor_hex}")
+
+
+class Mice:
+    def __init__(self):
+        self.mice = {}
+        self.context = pyudev.Context()
+        self.event_callback = None
+
+    def callback(self, fd, cond, device):
+        loop = True
+        while loop:
+            data = os.read(device.fileno(), 4096)
+            self.event_callback(data)
+            if not data:
+                break
+            if len(data) < 4096:
+                loop = False
+        return True
+
+    def on_device_event(self, action, device):
+        logging.info(action)
+        logging.info(device)
+        if action == 'remove':
+            self.on_remove(device)
+        elif action == 'add':
+            self.on_add(device)
+
+    def monitor_devices(self):
+        logging.info("Monitor mouse devices")
+        monitor = pyudev.Monitor.from_netlink(self.context)
+        monitor.filter_by(subsystem='hidraw')
+        observer = pyudev.MonitorObserver(monitor, self.on_device_event)
+        observer.start()
+
+    def watch(self, event_callback):
+        logging.info("HID mouse event watching started")
+        self.event_callback = event_callback
+        for device in self.context.list_devices(subsystem='hidraw'):
+            self.on_add(device)
+        self.monitor_devices()
+        logging.info("Watching mice")
+
+    def on_add(self, device):
+        logging.info(device)
+        hidraw = Hidraw(device.device_node)
+        if is_mouse(hidraw):
+            mouse = Mouse(device.device_node, hidraw.name, hidraw.report_descriptor)
+            mouse.print()
+            dev_file = open(mouse.dev_node, "r+b")
+            mouse.source = GLib.io_add_watch(dev_file, GLib.IO_IN, self.callback, dev_file)
+            self.mice[device.device_node] = mouse
+
+    def on_remove(self, device):
+        if device.device_node in self.mice:
+            mouse = self.mice[device.device_node]
+            mouse.print()
+            del self.mice[device.device_node]
+
+    def print(self):
+        for key, device in self.mice.items():
+            hid_raw = Hidraw(device.device_node)
+            d = hid_raw.report_descriptor
+            s = bytearray(d).hex()
+            logging.info(len(d))
+            logging.info(hid_raw.name)
+            logging.info(s)
+
+
+def is_mouse(hidraw):
+    """
+    HID Usage Page 0x01 (Generic Desktop)
+    HID Usage 0x02 (Mouse)
+    Descriptor starts with: 05 01 09 02 A1 01 ...
+    """
+    descriptor = hidraw.report_descriptor
+    hex_string = bytearray(descriptor).hex()
+    return hex_string.startswith("05010902a101")
+
+
+
 keyboards = Keyboards()
+mice = Mice()
